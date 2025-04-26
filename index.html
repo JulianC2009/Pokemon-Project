@@ -19,7 +19,7 @@
 
         async function loadModel() {
             document.getElementById('result').innerText = "Loading model...";
-            session = await ort.InferenceSession.create("pokemon_model.onnx");
+            session = await ort.InferenceSession.create("finalProject_model.onnx");
             document.getElementById('result').innerText = "Model loaded. Upload an image!";
         }
 
