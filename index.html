@@ -3,109 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <title>Pokémon Classifier</title>
-    <style>
-        .no-margin-ul {
-            margin: 0;
-        }
-
-        .bold {
-            font-weight: bold;
-        }
-    </style>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 </head>
 <body>
-    <h2>Is it Pikachu, Bulbasaur, or Charmander?</h2>
-    <h2>Danielle Turner, David Higley, Joseph Shapiro</h2>
-    <input type="file" id="imageUpload" accept="image/*" onchange="handleImage(event)">
-    <p>
-        Current status: <span id="status-output">Loading model...</span>
-    </p>
-    <p>
-        Model output: <span id="model-output"></span>
-    </p>
+    <h1>Is this Bulbasaur, Pikachu, or Charmander?</h1>
+    <input type="file" id="imageUpload" accept="image/*" />
+    <br><br>
+    <canvas id="canvas" width="32" height="32" style="display:none;"></canvas>
+    <p id="result">Upload an image to see the result.</p>
 
-    <script type="module">
-        import { createClassifier } from "https://cdn.jsdelivr.net/npm/@annexdev/annx@latest";
+    <script>
+        const labels = ["Bulbasaur", "Pikachu", "Charmander"];
+        const CONFIDENCE_THRESHOLD = 0.7;
 
-        let model;
-        let classifier;
-
-        const statusDict = [
-            "Waiting for file",
-            "Loading file",
-            "Performing inference",
-            "Inference complete"
-        ];
-
-        const modelClasses = [
-            "Bulbasaur",
-            "Charmander",
-            "Pikachu"
-        ];
-
-        const statusOutput = document.getElementById("status-output");
-
-        function sortedClasses(classProbabilities) {
-            const sorted = classProbabilities
-                .map((prob, index) => [prob, index])
-                .sort((a, b) => b[0] - a[0]);
-
-            return sorted.map(([prob, index]) => ({
-                index,
-                name: modelClasses[index],
-                probability: prob
-            }));
-        }
-
-        async function handleImage(event) {
-            const file = event.target.files[0];
+        document.getElementById('imageUpload').addEventListener('change', async function (e) {
+            const file = e.target.files[0];
             if (!file) return;
 
-            statusOutput.textContent = statusDict[1];
             const img = new Image();
-            img.src = URL.createObjectURL(file);
-
             img.onload = async () => {
-                statusOutput.textContent = statusDict[2];
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d');
 
-                const prediction = await classifier.classify(img);
-                const resultClasses = sortedClasses(prediction);
+                ctx.drawImage(img, 0, 0, 32, 32);
+                const imageData = ctx.getImageData(0, 0, 32, 32).data;
 
-                const outputElement = document.getElementById("model-output");
-                outputElement.replaceChildren();
+                const float32Data = new Float32Array(3 * 32 * 32);
 
-                resultClasses.forEach((item, index) => {
-                    const outputTitle = document.createElement("span");
-                    const outputData = document.createElement("ul");
-                    const dataClassId = document.createElement("li");
-                    const dataClassProb = document.createElement("li");
-                    const outputSpacer = document.createElement("br");
+                function softmax(arr) {
+                    const exps = arr.map(Math.exp);
+                    const sum = exps.reduce((a, b) => a + b, 0);
+                    return exps.map(v => v / sum);
+                }
 
-                    if (index === 0) {
-                        outputTitle.classList.add("bold");
-                    }
-                    outputData.classList.add("no-margin-ul");
+                const scores = output.output.data;
+                const probabilities = softmax(scores);
+                const maxProb = Math.max(...probabilities);
+                const maxIndex = probabilities.indexOf(maxProb);
 
-                    outputTitle.textContent = item.name;
-                    dataClassId.textContent = `Class id: ${item.index}`;
-                    dataClassProb.textContent = `Probability: ${item.probability.toFixed(4)}`;
+                const resultText = maxProb >= CONFIDENCE_THRESHOLD
+                    ? `Prediction: ${labels[maxIndex]} (Confidence: ${(maxProb * 100).toFixed(2)}%)`
+                    : "I don't think this is a Bulbasaur, Pikachu, or Charmander.";
 
-                    outputData.appendChild(dataClassId);
-                    outputData.appendChild(dataClassProb);
-
-                    outputElement.appendChild(outputSpacer);
-                    outputElement.appendChild(outputTitle);
-                    outputElement.appendChild(outputData);
-                });
-
-                statusOutput.textContent = statusDict[3];
+                document.getElementById('result').innerText = resultText;
             };
-        }
 
-        (async () => {
-            classifier = await createClassifier("./model/model.json");
-            statusOutput.textContent = statusDict[0];
-        })();
+            img.src = URL.createObjectURL(file);
+        });
     </script>
 </body>
 </html>
