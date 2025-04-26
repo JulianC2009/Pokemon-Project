@@ -2,25 +2,62 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Pokémon Classifier</title>
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Is it a Pokémon?</title>
+    <style>
+        .no-margin-ul {
+            margin: 0;
+        }
+        .bold {
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-    <h1>Is this Bulbasaur, Pikachu, or Charmander?</h1>
-    <input type="file" id="imageUpload" accept="image/*" />
-    <br><br>
-    <canvas id="canvas" width="32" height="32" style="display:none;"></canvas>
-    <p id="result">Upload an image to see the result.</p>
+    <h2>Is it a Bulbasaur, Charmander, or Pikachu?</h2>
+    <h2></h2>
+    <input type="file" name="Image" onchange="inputChanged(event)" autocomplete="off">
+    <p>
+        Current status: <span id="status-output">Loading model and scripts</span>
+    </p>
+    <p>
+        Model output: <span id="model-output"></span>
+    </p>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jimp/0.22.10/jimp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <script>
-        const labels = ["Bulbasaur", "Pikachu", "Charmander"];
-        const CONFIDENCE_THRESHOLD = 0.7;
-        let session;
+        const statusDict = ["Waiting for file", "Loading file", "Performing inference", "Inference complete"];
 
-        async function loadModel() {
-            document.getElementById('result').innerText = "Loading model...";
-            session = await ort.InferenceSession.create("main.onnx");
-            document.getElementById('result').innerText = "Model loaded. Upload an image!";
+        const modelClasses = ["Charmander", "Bulbasaur", "Pikachu"];
+
+        const CONFIDENCE_THRESHOLD = 0.7;
+
+        const statusOutput = document.getElementById("status-output");
+
+        async function getImageTensorFromPath(path, dims = [1, 3, 32, 32]) {
+            const image = await loadImagefromPath(path, dims[2], dims[3]);
+            return imageDataToTensor(image, dims);
+        }
+
+        function imageDataToTensor(image, dims) {
+            const imageBufferData = image.bitmap.data;
+            const [redArray, greenArray, blueArray] = [[], [], []];
+            for (let i = 0; i < imageBufferData.length; i += 4) {
+                redArray.push(imageBufferData[i]);
+                greenArray.push(imageBufferData[i + 1]);
+                blueArray.push(imageBufferData[i + 2]);
+            }
+            const transposedData = redArray.concat(greenArray).concat(blueArray);
+            const float32Data = new Float32Array(dims[1] * dims[2] * dims[3]);
+            for (let i = 0; i < transposedData.length; i++) {
+                float32Data[i] = (transposedData[i] / 255.0 - 0.5) / 0.5;
+            }
+            return new ort.Tensor("float32", float32Data, dims);
+        }
+
+        async function loadImagefromPath(path, width = 32, height = 32) {
+            return await Jimp.read(path).then(img => img.cover(width, height));
         }
 
         function softmax(arr) {
@@ -29,54 +66,71 @@
             return arr.map((value) => Math.exp(value - C) / d);
         }
 
-        function preprocessImage(imageData) {
-            const float32Data = new Float32Array(3 * 32 * 32);
-            for (let i = 0; i < 32 * 32; i++) {
-                const r = imageData[i * 4] / 255;
-                const g = imageData[i * 4 + 1] / 255;
-                const b = imageData[i * 4 + 2] / 255;
-                float32Data[i] = r;                     // R channel
-                float32Data[1024 + i] = g;              // G channel
-                float32Data[2048 + i] = b;              // B channel
-            }
-            return new ort.Tensor("float32", float32Data, [1, 3, 32, 32]);
+        function sortedClasses(probabilities) {
+            return probabilities.map((p, i) => ({ name: modelClasses[i], index: i, probability: p }))
+                                .sort((a, b) => b.probability - a.probability);
         }
 
-        document.getElementById('imageUpload').addEventListener('change', async function (e) {
-            const file = e.target.files[0];
-            if (!file || !session) return;
+        async function inference(path) {
+            try {
+                const session = await ort.InferenceSession.create('./finalProject_model.onnx');
+                const imageTensor = await getImageTensorFromPath(path);
+                statusOutput.textContent = statusDict[2];
+                const results = await session.run({ input: imageTensor });
+                const output = results.output.data;
+                return softmax(Array.from(output));
+            } catch (e) {
+                console.error(e);
+                return null;
+            }
+        }
 
-            const img = new Image();
-            img.onload = async () => {
-                const canvas = document.getElementById('canvas');
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, 32, 32);
-                const imageData = ctx.getImageData(0, 0, 32, 32).data;
+        async function inputChanged(event) {
+            statusOutput.textContent = statusDict[1];
+            const probs = await inference(URL.createObjectURL(event.target.files[0]));
+            if (!probs) {
+                statusOutput.textContent = "Failed to run inference.";
+                return;
+            }
 
-                const inputTensor = preprocessImage(imageData);
-                const feeds = {};
-                feeds[session.inputNames[0]] = inputTensor;
+            const resultClasses = sortedClasses(probs);
+            const topClass = resultClasses[0];
 
-                const output = await session.run(feeds);
-                const outputData = output[session.outputNames[0]].data;
+            const output = document.getElementById("model-output");
+            output.replaceChildren();
 
-                const probabilities = softmax(Array.from(outputData));
-                const maxProb = Math.max(...probabilities);
-                const maxIndex = probabilities.indexOf(maxProb);
+            const outputTitle = document.createElement("span");
+            const outputList = document.createElement("ul");
+            outputList.classList.add("no-margin-ul");
 
-                const resultText = maxProb >= CONFIDENCE_THRESHOLD
-                    ? `Prediction: ${labels[maxIndex]} (Confidence: ${(maxProb * 100).toFixed(2)}%)`
-                    : "I don't think this is a Bulbasaur, Pikachu, or Charmander.";
+            if (topClass.probability >= CONFIDENCE_THRESHOLD) {
+                outputTitle.textContent = `Prediction: ${topClass.name}`;
+            } else {
+                outputTitle.textContent = "This is neither a Bulbasaur, Charmander, nor Pikachu.";
+            }
+            outputTitle.classList.add("bold");
 
-                document.getElementById('result').innerText = resultText;
-            };
+            resultClasses.forEach(item => {
+                const idItem = document.createElement("li");
+                idItem.textContent = `Class: ${item.name}`;
+                const probItem = document.createElement("li");
+                probItem.textContent = `Probability: ${item.probability.toFixed(4)}`;
+                outputList.appendChild(idItem);
+                outputList.appendChild(probItem);
+                outputList.appendChild(document.createElement("br"));
+            });
 
-            img.src = URL.createObjectURL(file);
-        });
+            output.appendChild(document.createElement("br"));
+            output.appendChild(outputTitle);
+            output.appendChild(outputList);
 
-        loadModel();
+            statusOutput.textContent = statusDict[3];
+        }
+
+        statusOutput.textContent = statusDict[0];
     </script>
 </body>
 </html>
+
 
 
