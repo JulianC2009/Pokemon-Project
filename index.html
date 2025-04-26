@@ -1,79 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Pokémon Classifier</title>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
-  <style>
-    body { font-family: sans-serif; padding: 20px; text-align: center; }
-    canvas { border: 1px solid #ccc; margin: 10px auto; display: block; }
-    #result { font-size: 24px; margin-top: 20px; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Pokémon Classifier</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 </head>
 <body>
-  <h1>Pokémon Classifier</h1>
-  <p>Upload an image of Bulbasaur, Pikachu, or Charmander (32×32 or larger)</p>
-  <input type="file" id="imageUpload" accept="image/*"><br>
-  <canvas id="canvas" width="32" height="32"></canvas>
-  <div id="result">Awaiting image...</div>
+    <h1>Is this Bulbasaur, Pikachu, or Charmander?</h1>
+    <input type="file" id="imageUpload" accept="image/*" />
+    <br><br>
+    <canvas id="canvas" width="32" height="32" style="display:none;"></canvas>
+    <p id="result">Upload an image to see the result.</p>
 
-  <script>
-    const labels = ["Bulbasaur", "Pikachu", "Charmander"];
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const resultDiv = document.getElementById("result");
+    <script>
+        const labels = ["Bulbasaur", "Pikachu", "Charmander"];
+        const CONFIDENCE_THRESHOLD = 0.7;
 
-    let session;
+        document.getElementById('imageUpload').addEventListener('change', async function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
 
-    async function loadModel() {
-      session = await ort.InferenceSession.create('./finalProject_model.onnx');
-      console.log("Model loaded");
-    }
+            const img = new Image();
+            img.onload = async () => {
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d');
 
-    function preprocess(image) {
-      // Draw and resize image to 32x32
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, 32, 32);
-      const imageData = ctx.getImageData(0, 0, 32, 32).data;
+                ctx.drawImage(img, 0, 0, 32, 32);
+                const imageData = ctx.getImageData(0, 0, 32, 32).data;
 
-      // Convert to Float32 and normalize
-      const input = new Float32Array(3 * 32 * 32);
-      for (let i = 0; i < 32 * 32; i++) {
-        const r = imageData[i * 4] / 255;
-        const g = imageData[i * 4 + 1] / 255;
-        const b = imageData[i * 4 + 2] / 255;
+                const float32Data = new Float32Array(3 * 32 * 32);
+                for (let i = 0; i < 32 * 32; i++) {
+                    const r = imageData[i * 4] / 255;
+                    const g = imageData[i * 4 + 1] / 255;
+                    const b = imageData[i * 4 + 2] / 255;
 
-        input[i] = (r - 0.5) / 0.5;          // R channel
-        input[i + 32 * 32] = (g - 0.5) / 0.5; // G channel
-        input[i + 2 * 32 * 32] = (b - 0.5) / 0.5; // B channel
-      }
+                    float32Data[i] = (r - 0.5) / 0.5;
+                    float32Data[i + 32 * 32] = (g - 0.5) / 0.5;
+                    float32Data[i + 2 * 32 * 32] = (b - 0.5) / 0.5;
+                }
 
-      return input;
-    }
+                const inputTensor = new ort.Tensor("float32", float32Data, [1, 3, 32, 32]);
+                const session = await ort.InferenceSession.create("finalProject_model.onnx");
+                const output = await session.run({ input: inputTensor });
 
-    async function classifyImage(inputData) {
-      const tensor = new ort.Tensor('float32', inputData, [1, 3, 32, 32]);
-      const feeds = { input: tensor };
-      const output = await session.run(feeds);
-      const logits = output.output.data;
+                const scores = output.output.data;
+                const maxScore = Math.max(...scores);
+                const maxIndex = scores.indexOf(maxScore);
 
-      const maxIdx = logits.indexOf(Math.max(...logits));
-      resultDiv.textContent = `Prediction: ${labels[maxIdx]}`;
-    }
+                const resultText = maxScore >= CONFIDENCE_THRESHOLD
+                    ? `Prediction: ${labels[maxIndex]} (Confidence: ${(maxScore * 100).toFixed(2)}%)`
+                    : "I don't think this is a Bulbasaur, Pikachu, or Charmander.";
 
-    document.getElementById("imageUpload").addEventListener("change", (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
+                document.getElementById('result').innerText = resultText;
+            };
 
-      const img = new Image();
-      img.onload = async () => {
-        const inputData = preprocess(img);
-        await classifyImage(inputData);
-      };
-      img.src = URL.createObjectURL(file);
-    });
-
-    loadModel();
-  </script>
+            img.src = URL.createObjectURL(file);
+        });
+    </script>
 </body>
 </html>
+
