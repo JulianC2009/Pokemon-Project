@@ -3,37 +3,97 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Is it a Pokémon?</title>
+    <title>Who's That Pokémon?</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
     <style>
-        .no-margin-ul {
+        body {
             margin: 0;
+            padding: 0;
+            font-family: 'Poppins', sans-serif;
+            background: white;
+            color: black;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .bold {
+
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 350px;
+        }
+
+        h1 {
+            margin-bottom: 0.5rem;
+        }
+
+        h2 {
+            font-size: 1rem;
+            margin-bottom: 2rem;
+            color: #333;
+        }
+
+        input[type="file"] {
+            margin-top: 1rem;
+            padding: 0.5rem;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            cursor: pointer;
             font-weight: bold;
+            transition: background-color 0.3s;
+        }
+
+        input[type="file"]:hover {
+            background-color: #e0e0e0;
+        }
+
+        p {
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        .bold {
+            font-weight: 600;
+        }
+
+        ul {
+            padding: 0;
+            list-style: none;
+            margin-top: 0.5rem;
+        }
+
+        li {
+            margin: 0.25rem 0;
         }
     </style>
 </head>
 <body>
-    <h2>Who's that Pokemon, Bulbasaur, Charmander, or Pikachu?</h2>
-    <h2>Julian Cortez, Dominic Leon</h2>
-    <input type="file" name="Image" onchange="inputChanged(event)" autocomplete="off">
-    <p>
-        Current status: <span id="status-output">Loading model and scripts</span>
-    </p>
-    <p>
-        Model output: <span id="model-output"></span>
-    </p>
+    <div class="container">
+        <h1>Who's That Pokémon?</h1>
+        <h2>by Julian Cortez & Dominic Leon</h2>
+
+        <input type="file" name="Image" onchange="inputChanged(event)" autocomplete="off">
+
+        <p class="bold">Results:</p>
+        <div id="model-output"></div>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jimp/0.22.10/jimp.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <script>
-        const statusDict = ["Waiting for file", "Loading file", "Performing inference", "Inference complete"];
-
         const modelClasses = ["bulbasaur", "charmander", "pikachu"];
-        
         const CONFIDENCE_THRESHOLD = 0.7;
+        let session = null;
 
-        const statusOutput = document.getElementById("status-output");
+        async function loadModel() {
+            session = await ort.InferenceSession.create('./finalProject_model.onnx');
+        }
+        loadModel();
 
         async function getImageTensorFromPath(path, dims = [1, 3, 32, 32]) {
             const image = await loadImagefromPath(path, dims[2], dims[3]);
@@ -73,9 +133,7 @@
 
         async function inference(path) {
             try {
-                const session = await ort.InferenceSession.create('./finalProject_model.onnx');
                 const imageTensor = await getImageTensorFromPath(path);
-                statusOutput.textContent = statusDict[2];
                 const results = await session.run({ input: imageTensor });
                 const output = results.output.data;
                 return softmax(Array.from(output));
@@ -86,10 +144,8 @@
         }
 
         async function inputChanged(event) {
-            statusOutput.textContent = statusDict[1];
             const probs = await inference(URL.createObjectURL(event.target.files[0]));
             if (!probs) {
-                statusOutput.textContent = "Failed to run inference.";
                 return;
             }
 
@@ -99,12 +155,11 @@
             const output = document.getElementById("model-output");
             output.replaceChildren();
 
-            const outputTitle = document.createElement("span");
+            const outputTitle = document.createElement("div");
             const outputList = document.createElement("ul");
-            outputList.classList.add("no-margin-ul");
 
             if (topClass.probability >= CONFIDENCE_THRESHOLD) {
-                outputTitle.textContent = `Prediction: ${topClass.name}`;
+                outputTitle.textContent = `Prediction: ${topClass.name.toUpperCase()}`;
             } else {
                 outputTitle.textContent = "This is neither a Bulbasaur, Charmander, nor Pikachu.";
             }
@@ -117,17 +172,11 @@
                 probItem.textContent = `Probability: ${item.probability.toFixed(4)}`;
                 outputList.appendChild(idItem);
                 outputList.appendChild(probItem);
-                outputList.appendChild(document.createElement("br"));
             });
 
-            output.appendChild(document.createElement("br"));
             output.appendChild(outputTitle);
             output.appendChild(outputList);
-
-            statusOutput.textContent = statusDict[3];
         }
-
-        statusOutput.textContent = statusDict[0];
     </script>
 </body>
 </html>
